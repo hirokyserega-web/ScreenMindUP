@@ -1,0 +1,10 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <IsPackable>false</IsPackable>
+  </PropertyGroup>
+  <ItemGroup>
+    <ProjectReference Include="..\..\src\ScreenMind.Core\ScreenMind.Core.csproj" />
+    <ProjectReference Include="..\..\src\ScreenMind.AI\ScreenMind.AI.csproj" />
+    <ProjectReference Include="..\..\src\ScreenMind.Infrastructure\ScreenMind.Infrastructure.csproj" />
+  </ItemGroup>
+</Project>

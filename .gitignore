@@ -1,0 +1,35 @@
+# Build results
+bin/
+obj/
+artifacts/
+publish/
+*.user
+*.suo
+
+# IDE
+.vs/
+.vscode/
+.idea/
+*.DotSettings.user
+
+# Test results
+TestResults/
+coverage/
+*.trx
+*.coverage
+
+# Installer output (never stored in Git)
+installer/output/
+*.msi
+*.exe.zip
+
+# OS
+Thumbs.db
+.DS_Store
+
+# NuGet
+*.nupkg
+packages/
+
+# Avalonia build tasks cache
+.avalonia-build-tasks/

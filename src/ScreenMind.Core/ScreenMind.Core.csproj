@@ -1,0 +1,5 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <RootNamespace>ScreenMind.Core</RootNamespace>
+  </PropertyGroup>
+</Project>

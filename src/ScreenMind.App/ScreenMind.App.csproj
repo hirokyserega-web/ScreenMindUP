@@ -1,0 +1,31 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <OutputType>WinExe</OutputType>
+    <RootNamespace>ScreenMind.App</RootNamespace>
+    <AssemblyName>ScreenMind</AssemblyName>
+    <ApplicationManifest>app.manifest</ApplicationManifest>
+    <BuiltInComInteropSupport>true</BuiltInComInteropSupport>
+  </PropertyGroup>
+  <ItemGroup>
+    <PackageReference Include="Avalonia" />
+    <PackageReference Include="Avalonia.Desktop" />
+    <PackageReference Include="Avalonia.Themes.Fluent" />
+    <PackageReference Include="Avalonia.Fonts.Inter" />
+    <PackageReference Include="Avalonia.Diagnostics" Condition="'$(Configuration)' == 'Debug'" />
+    <PackageReference Include="Microsoft.Extensions.DependencyInjection" />
+    <PackageReference Include="Microsoft.Extensions.Logging" />
+    <PackageReference Include="Microsoft.Extensions.Logging.Console" />
+  </ItemGroup>
+  <ItemGroup>
+    <ProjectReference Include="..\ScreenMind.Core\ScreenMind.Core.csproj" />
+    <ProjectReference Include="..\ScreenMind.UI\ScreenMind.UI.csproj" />
+    <ProjectReference Include="..\ScreenMind.Infrastructure\ScreenMind.Infrastructure.csproj" />
+    <ProjectReference Include="..\ScreenMind.Platform.Windows\ScreenMind.Platform.Windows.csproj" />
+    <ProjectReference Include="..\ScreenMind.AI\ScreenMind.AI.csproj" />
+    <ProjectReference Include="..\ScreenMind.Providers.OpenAI\ScreenMind.Providers.OpenAI.csproj" />
+    <ProjectReference Include="..\ScreenMind.Providers.Anthropic\ScreenMind.Providers.Anthropic.csproj" />
+    <ProjectReference Include="..\ScreenMind.Providers.Gemini\ScreenMind.Providers.Gemini.csproj" />
+    <ProjectReference Include="..\ScreenMind.Providers.OpenAICompatible\ScreenMind.Providers.OpenAICompatible.csproj" />
+    <ProjectReference Include="..\ScreenMind.Providers.Ollama\ScreenMind.Providers.Ollama.csproj" />
+  </ItemGroup>
+</Project>
