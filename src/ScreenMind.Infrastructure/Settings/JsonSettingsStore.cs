@@ -7,11 +7,10 @@ using ScreenMind.Core.Settings;
 namespace ScreenMind.Infrastructure.Settings;
 
 /// <summary>
-/// JSON-file settings store with schema migration, atomic writes
-/// (temp file + rename), a rolling .bak backup and recovery from corrupted
-/// files. Never stores secrets.
+/// JSON-file settings store with schema migration, atomic writes,
+/// a rolling .bak backup and recovery from corrupted files. Never stores secrets.
 /// </summary>
-public sealed class JsonSettingsStore : ISettingsStore<AppSettings>
+public sealed class JsonSettingsStore : ISettingsStore<AppSettings>, IDisposable
 {
     private static readonly JsonSerializerOptions _jsonOptions = new()
     {
@@ -39,6 +38,8 @@ public sealed class JsonSettingsStore : ISettingsStore<AppSettings>
         await _gate.WaitAsync(cancellationToken).ConfigureAwait(false);
         try
         {
+            CleanupStaleTempFiles();
+            var primaryExists = File.Exists(_filePath);
             var settings = await TryLoadFileAsync(_filePath, cancellationToken).ConfigureAwait(false);
             if (settings is not null)
             {
@@ -49,11 +50,16 @@ public sealed class JsonSettingsStore : ISettingsStore<AppSettings>
             if (settings is not null)
             {
                 _logger.LogWarning("Primary settings file was missing or corrupted; recovered from backup.");
-                await SaveCoreAsync(settings, cancellationToken).ConfigureAwait(false);
+                if (primaryExists)
+                {
+                    QuarantineCorruptedFile();
+                }
+
+                await WritePrimaryWithoutRotatingBackupAsync(settings, cancellationToken).ConfigureAwait(false);
                 return settings;
             }
 
-            if (File.Exists(_filePath))
+            if (primaryExists)
             {
                 QuarantineCorruptedFile();
             }
@@ -76,6 +82,7 @@ public sealed class JsonSettingsStore : ISettingsStore<AppSettings>
         await _gate.WaitAsync(cancellationToken).ConfigureAwait(false);
         try
         {
+            CleanupStaleTempFiles();
             await SaveCoreAsync(settings, cancellationToken).ConfigureAwait(false);
         }
         finally
@@ -83,6 +90,8 @@ public sealed class JsonSettingsStore : ISettingsStore<AppSettings>
             _gate.Release();
         }
     }
+
+    public void Dispose() => _gate.Dispose();
 
     private async Task<AppSettings?> TryLoadFileAsync(string path, CancellationToken cancellationToken)
     {
@@ -112,7 +121,6 @@ public sealed class JsonSettingsStore : ISettingsStore<AppSettings>
             {
                 _logger.LogInformation(
                     "Settings migrated to schema version {Version}.", AppSettings.CurrentSchemaVersion);
-                await SaveCoreAsync(settings, cancellationToken).ConfigureAwait(false);
             }
 
             return settings;
@@ -123,12 +131,50 @@ public sealed class JsonSettingsStore : ISettingsStore<AppSettings>
         }
         catch (Exception ex)
         {
-            _logger.LogError(ex, "Failed to load settings from {Path}.", path);
+            _logger.LogError(
+                "Failed to load settings from {Path}: {ErrorType}.",
+                path,
+                ex.GetType().Name);
             return null;
         }
     }
 
     private async Task SaveCoreAsync(AppSettings settings, CancellationToken cancellationToken)
+    {
+        var tempPath = await WriteTempFileAsync(settings, cancellationToken).ConfigureAwait(false);
+        try
+        {
+            if (File.Exists(_filePath))
+            {
+                File.Copy(_filePath, _backupPath, overwrite: true);
+            }
+
+            File.Move(tempPath, _filePath, overwrite: true);
+        }
+        finally
+        {
+            DeleteIfExists(tempPath);
+        }
+    }
+
+    private async Task WritePrimaryWithoutRotatingBackupAsync(
+        AppSettings settings,
+        CancellationToken cancellationToken)
+    {
+        var tempPath = await WriteTempFileAsync(settings, cancellationToken).ConfigureAwait(false);
+        try
+        {
+            File.Move(tempPath, _filePath, overwrite: true);
+        }
+        finally
+        {
+            DeleteIfExists(tempPath);
+        }
+    }
+
+    private async Task<string> WriteTempFileAsync(
+        AppSettings settings,
+        CancellationToken cancellationToken)
     {
         var directory = Path.GetDirectoryName(_filePath);
         if (!string.IsNullOrEmpty(directory))
@@ -137,29 +183,49 @@ public sealed class JsonSettingsStore : ISettingsStore<AppSettings>
         }
 
         var json = JsonSerializer.Serialize(settings, _jsonOptions);
-        var tempPath = _filePath + ".tmp";
-
+        var tempPath = _filePath + ".tmp-" + Guid.NewGuid().ToString("N");
         await File.WriteAllTextAsync(tempPath, json, cancellationToken).ConfigureAwait(false);
+        return tempPath;
+    }
 
-        if (File.Exists(_filePath))
+    private void CleanupStaleTempFiles()
+    {
+        var directory = Path.GetDirectoryName(_filePath);
+        if (string.IsNullOrEmpty(directory) || !Directory.Exists(directory))
         {
-            File.Copy(_filePath, _backupPath, overwrite: true);
+            return;
         }
 
-        File.Move(tempPath, _filePath, overwrite: true);
+        var prefix = Path.GetFileName(_filePath) + ".tmp";
+        foreach (var path in Directory.EnumerateFiles(directory, prefix + "*"))
+        {
+            DeleteIfExists(path);
+        }
     }
 
     private void QuarantineCorruptedFile()
     {
         try
         {
-            var quarantinePath = _filePath + $".corrupt-{DateTime.UtcNow:yyyyMMddHHmmss}";
-            File.Move(_filePath, quarantinePath, overwrite: true);
+            var quarantinePath = _filePath + $".corrupt-{DateTime.UtcNow:yyyyMMddHHmmssfff}-{Guid.NewGuid():N}";
+            File.Move(_filePath, quarantinePath, overwrite: false);
             _logger.LogWarning("Corrupted settings file moved to {Path}.", quarantinePath);
         }
-        catch (IOException ex)
+        catch (IOException)
         {
-            _logger.LogError(ex, "Failed to quarantine corrupted settings file.");
+            _logger.LogError("Failed to quarantine corrupted settings file.");
+        }
+    }
+
+    private void DeleteIfExists(string path)
+    {
+        try
+        {
+            File.Delete(path);
+        }
+        catch (IOException)
+        {
+            _logger.LogWarning("Failed to delete temporary settings file {Path}.", path);
         }
     }
 }

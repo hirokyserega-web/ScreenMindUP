@@ -14,10 +14,10 @@ public sealed class AnalysisStateMachine
         new Dictionary<AnalysisState, AnalysisState[]>
         {
             [AnalysisState.Idle] = [AnalysisState.Selecting, AnalysisState.Capturing],
-            [AnalysisState.Selecting] = [AnalysisState.Capturing, AnalysisState.Idle, AnalysisState.Cancelling],
+            [AnalysisState.Selecting] = [AnalysisState.Capturing, AnalysisState.Idle, AnalysisState.Cancelling, AnalysisState.Failed],
             [AnalysisState.Capturing] = [AnalysisState.Preprocessing, AnalysisState.Cancelling, AnalysisState.Failed],
             [AnalysisState.Preprocessing] = [AnalysisState.Sending, AnalysisState.Cancelling, AnalysisState.Failed],
-            [AnalysisState.Sending] = [AnalysisState.Streaming, AnalysisState.Cancelling, AnalysisState.Failed],
+            [AnalysisState.Sending] = [AnalysisState.Streaming, AnalysisState.Completed, AnalysisState.Cancelling, AnalysisState.Failed],
             [AnalysisState.Streaming] = [AnalysisState.Completed, AnalysisState.Cancelling, AnalysisState.Failed],
             [AnalysisState.Completed] = [AnalysisState.Idle, AnalysisState.Selecting, AnalysisState.Capturing],
             [AnalysisState.Cancelling] = [AnalysisState.Idle],

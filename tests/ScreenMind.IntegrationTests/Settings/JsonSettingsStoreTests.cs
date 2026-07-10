@@ -1,3 +1,4 @@
+using System.Text.Json;
 using Microsoft.Extensions.Logging.Abstractions;
 using ScreenMind.Core.Settings;
 using ScreenMind.Infrastructure.Settings;
@@ -17,9 +18,7 @@ public sealed class JsonSettingsStoreTests : IDisposable
     [Fact]
     public async Task Load_WhenFileMissing_CreatesDefaults()
     {
-        var store = CreateStore();
-
-        var settings = await store.LoadAsync(CancellationToken.None);
+        var settings = await CreateStore().LoadAsync(CancellationToken.None);
 
         settings.SchemaVersion.Should().Be(AppSettings.CurrentSchemaVersion);
         File.Exists(SettingsPath).Should().BeTrue();
@@ -31,14 +30,14 @@ public sealed class JsonSettingsStoreTests : IDisposable
         var store = CreateStore();
         var settings = new AppSettings
         {
-            General = new GeneralSettings { Language = "ru", StartWithWindows = true },
+            General = new GeneralSettings { Language = "en", StartWithWindows = true },
             Ui = new UiSettings { Theme = "Dark", OverlayOpacity = 0.8 },
         };
 
         await store.SaveAsync(settings, CancellationToken.None);
         var loaded = await CreateStore().LoadAsync(CancellationToken.None);
 
-        loaded.General.Language.Should().Be("ru");
+        loaded.General.Language.Should().Be("en");
         loaded.General.StartWithWindows.Should().BeTrue();
         loaded.Ui.Theme.Should().Be("Dark");
         loaded.Ui.OverlayOpacity.Should().Be(0.8);
@@ -50,28 +49,47 @@ public sealed class JsonSettingsStoreTests : IDisposable
         var store = CreateStore();
         await store.SaveAsync(new AppSettings(), CancellationToken.None);
         await store.SaveAsync(
-            new AppSettings { General = new GeneralSettings { Language = "de" } },
+            new AppSettings { General = new GeneralSettings { Language = "en" } },
             CancellationToken.None);
 
         File.Exists(SettingsPath + ".bak").Should().BeTrue();
     }
 
     [Fact]
-    public async Task Load_WhenFileCorrupted_RecoversFromBackup()
+    public async Task Recovery_PreservesValidBackup_AndCanRecoverTwice()
     {
         var store = CreateStore();
-        await store.SaveAsync(
-            new AppSettings { General = new GeneralSettings { Language = "fr" } },
-            CancellationToken.None);
-        await store.SaveAsync(
-            new AppSettings { General = new GeneralSettings { Language = "fr" } },
-            CancellationToken.None);
+        await store.SaveAsync(new AppSettings(), CancellationToken.None);
+        await store.SaveAsync(new AppSettings(), CancellationToken.None);
 
-        await File.WriteAllTextAsync(SettingsPath, "{ this is not json !!!");
+        await File.WriteAllTextAsync(SettingsPath, "{ corrupt primary");
+        var first = await CreateStore().LoadAsync(CancellationToken.None);
 
-        var loaded = await CreateStore().LoadAsync(CancellationToken.None);
+        first.General.Language.Should().Be("ru");
+        await AssertValidSettingsFileAsync(SettingsPath + ".bak");
+        Directory.EnumerateFiles(_dir, "*.corrupt-*").Should().ContainSingle();
 
-        loaded.General.Language.Should().Be("fr");
+        await File.WriteAllTextAsync(SettingsPath, "{ corrupt again");
+        var second = await CreateStore().LoadAsync(CancellationToken.None);
+
+        second.General.Language.Should().Be("ru");
+        await AssertValidSettingsFileAsync(SettingsPath + ".bak");
+        Directory.EnumerateFiles(_dir, "*.corrupt-*").Should().HaveCount(2);
+    }
+
+    [Fact]
+    public async Task Recovery_ReplacesStaleTempFile()
+    {
+        var store = CreateStore();
+        await store.SaveAsync(new AppSettings(), CancellationToken.None);
+        await store.SaveAsync(new AppSettings(), CancellationToken.None);
+        await File.WriteAllTextAsync(SettingsPath, "broken");
+        await File.WriteAllTextAsync(SettingsPath + ".tmp", "stale temp");
+
+        await CreateStore().LoadAsync(CancellationToken.None);
+
+        File.Exists(SettingsPath + ".tmp").Should().BeFalse();
+        await AssertValidSettingsFileAsync(SettingsPath);
     }
 
     [Fact]
@@ -91,10 +109,7 @@ public sealed class JsonSettingsStoreTests : IDisposable
     public async Task Save_WhenSettingsInvalid_ThrowsAndDoesNotWrite()
     {
         var store = CreateStore();
-        var invalid = new AppSettings
-        {
-            Ui = new UiSettings { OverlayOpacity = 5.0 },
-        };
+        var invalid = new AppSettings { Ui = new UiSettings { OverlayOpacity = 5.0 } };
 
         var act = () => store.SaveAsync(invalid, CancellationToken.None);
 
@@ -106,12 +121,34 @@ public sealed class JsonSettingsStoreTests : IDisposable
     public async Task Load_WhenSchemaVersionNewerThanSupported_FallsBackSafely()
     {
         Directory.CreateDirectory(_dir);
-        await File.WriteAllTextAsync(
-            SettingsPath, """{ "schemaVersion": 999 }""");
+        await File.WriteAllTextAsync(SettingsPath, """{ "schemaVersion": 999 }""");
 
         var loaded = await CreateStore().LoadAsync(CancellationToken.None);
 
         loaded.SchemaVersion.Should().Be(AppSettings.CurrentSchemaVersion);
+    }
+
+    [Fact]
+    public async Task Load_WhenMalformedJsonContainsSensitiveText_DoesNotLogIt()
+    {
+        Directory.CreateDirectory(_dir);
+        const string sensitive = "prompt-and-secret-must-not-leak";
+        await File.WriteAllTextAsync(SettingsPath, $"{{ \"systemPrompt\": \"{sensitive}\", broken }}");
+        var logger = new CapturingLogger<JsonSettingsStore>();
+
+        await new JsonSettingsStore(SettingsPath, logger).LoadAsync(CancellationToken.None);
+
+        logger.Messages.Should().NotContain(message => message.Contains(sensitive, StringComparison.Ordinal));
+    }
+
+    private static async Task AssertValidSettingsFileAsync(string path)
+    {
+        var json = await File.ReadAllTextAsync(path);
+        var settings = JsonSerializer.Deserialize<AppSettings>(
+            json,
+            new JsonSerializerOptions { PropertyNameCaseInsensitive = true });
+        settings.Should().NotBeNull();
+        SettingsValidator.Validate(settings!).IsValid.Should().BeTrue();
     }
 
     public void Dispose()
@@ -123,5 +160,22 @@ public sealed class JsonSettingsStoreTests : IDisposable
         catch (IOException)
         {
         }
+    }
+
+    private sealed class CapturingLogger<T> : Microsoft.Extensions.Logging.ILogger<T>
+    {
+        public List<string> Messages { get; } = [];
+
+        public IDisposable? BeginScope<TState>(TState state) where TState : notnull => null;
+
+        public bool IsEnabled(Microsoft.Extensions.Logging.LogLevel logLevel) => true;
+
+        public void Log<TState>(
+            Microsoft.Extensions.Logging.LogLevel logLevel,
+            Microsoft.Extensions.Logging.EventId eventId,
+            TState state,
+            Exception? exception,
+            Func<TState, Exception?, string> formatter) =>
+            Messages.Add(formatter(state, exception));
     }
 }

@@ -40,6 +40,28 @@ public sealed class AnalysisStateMachineTests
         sm.CanStartAnalysis.Should().BeTrue();
     }
 
+    [Fact]
+    public void Non_streaming_response_can_complete_directly_from_sending()
+    {
+        var sm = BuildInState(AnalysisState.Sending);
+
+        sm.TransitionTo(AnalysisState.Completed);
+
+        sm.State.Should().Be(AnalysisState.Completed);
+        sm.CanStartAnalysis.Should().BeTrue();
+    }
+
+    [Fact]
+    public void Selection_failure_moves_analysis_to_failed()
+    {
+        var sm = BuildInState(AnalysisState.Selecting);
+
+        sm.TransitionTo(AnalysisState.Failed);
+
+        sm.State.Should().Be(AnalysisState.Failed);
+        sm.CanStartAnalysis.Should().BeTrue();
+    }
+
     [Theory]
     [InlineData(AnalysisState.Idle, AnalysisState.Streaming)]
     [InlineData(AnalysisState.Idle, AnalysisState.Completed)]
