@@ -3,25 +3,14 @@ using ScreenMind.Core.Settings;
 
 namespace ScreenMind.Infrastructure.Settings;
 
-/// <summary>
-/// Migrates persisted settings JSON between schema versions. Each registered
-/// step upgrades exactly one version; steps are applied sequentially until the
-/// document reaches <see cref="AppSettings.CurrentSchemaVersion"/>.
-/// </summary>
 public static class SettingsMigrator
 {
-    /// <summary>
-    /// Migration steps keyed by source version. A step receives the JSON tree
-    /// at version N and mutates it to be valid at version N + 1.
-    /// Version 1 is the initial schema, so the table is empty until version 2 exists.
-    /// </summary>
     private static readonly IReadOnlyDictionary<int, Action<JsonObject>> _steps =
-        new Dictionary<int, Action<JsonObject>>();
+        new Dictionary<int, Action<JsonObject>>
+        {
+            [1] = MigrateVersion1To2,
+        };
 
-    /// <summary>
-    /// Upgrades the raw JSON tree to the current schema version.
-    /// Returns the modified node and whether any migration step ran.
-    /// </summary>
     public static (JsonObject Node, bool Migrated) Migrate(JsonObject root)
     {
         ArgumentNullException.ThrowIfNull(root);
@@ -48,6 +37,58 @@ public static class SettingsMigrator
         }
 
         return (root, migrated);
+    }
+
+    private static void MigrateVersion1To2(JsonObject root)
+    {
+        var general = GetOrCreateObject(root, "general");
+        if (general["language"]?.GetValue<string>() == "en")
+        {
+            general["language"] = "ru";
+        }
+
+        var hotkeys = GetOrCreateObject(root, "hotkeys");
+        hotkeys["captureMonitor"] = "Ctrl+Shift+S";
+        hotkeys["captureRegion"] = "Ctrl+Shift+A";
+        hotkeys["askWithScreenshot"] = hotkeys["askWithScreenshot"]?.DeepClone() ?? "Ctrl+Shift+Q";
+        hotkeys["toggleInterface"] = hotkeys["toggleInterface"]?.DeepClone() ?? "Ctrl+Shift+Space";
+        hotkeys["cancelCurrentAction"] = hotkeys["cancelCurrentAction"]?.DeepClone() ?? "Esc";
+        hotkeys.Remove("openChat");
+
+        var profiles = GetOrCreateObject(root, "profiles");
+        if (profiles["customProfiles"] is not JsonArray customProfiles)
+        {
+            return;
+        }
+
+        foreach (var profile in customProfiles.OfType<JsonObject>())
+        {
+            profile["providerId"] = profile["providerId"]?.DeepClone() ?? "openai";
+            profile["modelId"] = profile["modelId"]?.DeepClone() ?? "gpt-4o";
+            profile["captureMode"] = profile["captureMode"]?.DeepClone() ?? "ActiveWindow";
+            profile["streamingEnabled"] = profile["streamingEnabled"]?.DeepClone() ?? true;
+            profile["timeoutSeconds"] = profile["timeoutSeconds"]?.DeepClone() ?? 120;
+            profile["maxResponseCharacters"] = profile["maxResponseCharacters"]?.DeepClone() ?? 16000;
+            profile["image"] = profile["image"]?.DeepClone() ?? new JsonObject
+            {
+                ["format"] = "Png",
+                ["jpegQuality"] = 85,
+                ["maxPayloadBytes"] = 5 * 1024 * 1024,
+                ["maxDimension"] = 3840,
+            };
+        }
+    }
+
+    private static JsonObject GetOrCreateObject(JsonObject root, string propertyName)
+    {
+        if (root[propertyName] is JsonObject value)
+        {
+            return value;
+        }
+
+        value = new JsonObject();
+        root[propertyName] = value;
+        return value;
     }
 
     private static int ReadVersion(JsonObject root)

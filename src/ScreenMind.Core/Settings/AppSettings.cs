@@ -8,7 +8,7 @@ namespace ScreenMind.Core.Settings;
 public sealed record AppSettings
 {
     /// <summary>Current settings schema version. Bump when the shape changes and add a migration.</summary>
-    public const int CurrentSchemaVersion = 1;
+    public const int CurrentSchemaVersion = 2;
 
     public int SchemaVersion { get; init; } = CurrentSchemaVersion;
 
